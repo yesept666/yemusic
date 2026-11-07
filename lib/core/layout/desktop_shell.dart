@@ -64,7 +64,7 @@ class DesktopShell extends StatefulWidget {
 class DesktopShellState extends State<DesktopShell> {
   static const double _kMinSidebar = 200.0;
   static const double _kMaxSidebar = 380.0;
-  static const double _kDefaultSidebar = 240.0;
+  static const double _kDefaultSidebar = 232.0;
 
   /// 走双栏 Master-Detail 的 Tab（计划 4.4 B 类）：选一项在右侧详情面板打开。
   /// 其余 Tab 走中央内容区导航（A 类），详情整屏 push 进中央栈。

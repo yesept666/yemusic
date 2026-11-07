@@ -200,8 +200,9 @@ class SettingsRepository {
   static const String _keyDesktopDetailRatio = 'desktop_detail_ratio';
 
   /// 桌面外壳（侧栏 + 顶部工具栏）总开关。
-  /// 默认关闭：无论横竖屏都走常规响应式布局（手机底栏 / 横屏侧边 Rail）；
-  /// 开启后无论横竖屏都强制使用桌面外壳（见 [isDesktopLayout]）。
+  /// 未设置时 Windows 默认开（桌面音乐软件式外壳），其它平台默认关：
+  /// 关则无论横竖屏都走常规响应式布局（手机底栏 / 横屏侧边 Rail）；
+  /// 开则无论横竖屏都强制使用桌面外壳（见 [isDesktopLayout]）。
   /// 键公开：`runBootstrap` 首帧前播种要读同一个键，勿再写字面量。
   static const String desktopModeEnabledPreferenceKey =
       'settings_desktop_mode_enabled';
@@ -219,10 +220,11 @@ class SettingsRepository {
     await prefs.setBool(windowsTwoPaneEnabledPreferenceKey, enabled);
   }
 
-  /// 是否启用桌面外壳。未设置时默认 false（不使用新横屏界面）。
+  /// 是否启用桌面外壳。未设置时 Windows 默认 true，其它平台默认 false。
   Future<bool> getDesktopModeEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(desktopModeEnabledPreferenceKey) ?? false;
+    return prefs.getBool(desktopModeEnabledPreferenceKey) ??
+        Platform.isWindows;
   }
 
   Future<void> setDesktopModeEnabled(bool enabled) async {

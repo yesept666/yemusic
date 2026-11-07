@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/build_flags.dart';
 import '../../core/layout/bottom_chrome_dimens.dart';
+import '../../core/layout/responsive_layout.dart';
 import '../../core/platform_capabilities.dart' show isWindowsDesktop;
 import '../../core/remote/remote_slider.dart';
 import '../../core/theme/app_dimens.dart';
@@ -11,15 +12,18 @@ import '../../core/theme/motion_constants.dart';
 import '../../core/utils/app_haptics.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../utils/landscape_immersive.dart';
+import '../../widgets/player_volume_slider.dart';
 import '../../widgets/smart_artwork_image.dart';
 import 'full_player_route.dart';
+import 'player_tab_layout.dart';
 
 /// 全宽底部播放栏（桌面音乐软件式，见横屏平板重设计计划 4.6）。
 ///
 /// 横跨侧栏 + 内容区，复用 [PlayerProvider]。布局：
 /// - 左：封面 + 标题/歌手（点击进完整播放页）；
 /// - 中：上一首 / 播放暂停 / 下一首 + 进度条（可拖动 seek）；
-/// - 右：收藏 / 播放模式（循环·随机）。
+/// - 右：歌词 / 待播清单 / 音量 / 收藏 / 播放模式（循环·随机）。
 ///
 /// 桌面布局下由 [DesktopShell] 渲染，同时抑制底部全局 [MiniPlayer] 与二级
 /// 悬浮播放器，避免三套播放器并存割裂。无正在播放歌曲时整栏收起。
@@ -327,6 +331,56 @@ class _NowPlayingExtras extends StatelessWidget {
     }
   }
 
+  /// 打开完整播放页并落到指定 tab（与 FullPlayer._syncTabLayout 同一套推导）。
+  ///
+  /// 宽屏下歌词 / 播放列表的下标随「横屏控制面板独立页」开关与本地歌曲（评论
+  /// tab）变化，写死下标会在控制页开启时落错页；这里按同一份结构现算。
+  /// 播放页已开着时：歌词走专用的原地跳转命令；其它 tab 靠新开实例的
+  /// playerTabIndex（已开实例不跟随，openFullPlayer 会把它带回前台）。
+  void _openPlayerOnTab(BuildContext context, PlayerTabKind kind) {
+    final width = MediaQuery.sizeOf(context).width;
+    final layout = resolvePlayerTabLayout(
+      isWideLayout: isWidePlayerTabLayout(
+        dockMode: false,
+        deviceIsPad: isPadLayout(context),
+        width: width,
+      ),
+      isLocalSong: song != null && !song.isOnline,
+      closeLocalMusicComments: player.closeLocalMusicComments,
+      showControlsPage: kLandscapeDetachedControlsEnabled.value,
+    );
+    final target = layout.indexOfKind(kind);
+    if (target >= 0) playerTabIndex.value = target;
+    if (kind == PlayerTabKind.lyrics) sendDockPlayerLyricsCommand();
+    openFullPlayer(context);
+  }
+
+  /// 音量弹窗：复用播放页同款滑杆（静音/恢复 + 百分比 + 独占模式标识）。
+  void _showVolumeDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 280),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: PlayerVolumeSlider(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _volumeIcon() {
+    final volume = player.volume;
+    if (volume <= 0) return Icons.volume_off;
+    if (volume < 0.5) return Icons.volume_down;
+    return Icons.volume_up;
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -335,6 +389,30 @@ class _NowPlayingExtras extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
+        IconButton(
+          tooltip: '歌词',
+          icon: const Icon(Icons.lyrics_outlined),
+          onPressed: () {
+            AppHaptics.click(HapticCategory.navigation);
+            _openPlayerOnTab(context, PlayerTabKind.lyrics);
+          },
+        ),
+        IconButton(
+          tooltip: '待播清单',
+          icon: const Icon(Icons.queue_music),
+          onPressed: () {
+            AppHaptics.click(HapticCategory.navigation);
+            _openPlayerOnTab(context, PlayerTabKind.playlist);
+          },
+        ),
+        IconButton(
+          tooltip: '音量',
+          icon: Icon(_volumeIcon()),
+          onPressed: () {
+            AppHaptics.click(HapticCategory.transport);
+            _showVolumeDialog(context);
+          },
+        ),
         IconButton(
           tooltip: isFav ? '取消收藏' : '收藏',
           icon: Icon(

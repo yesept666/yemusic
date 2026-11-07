@@ -312,11 +312,12 @@ Future<(bool, bool, bool, ThemeMode?)> runBootstrap() async {
         prefs.getBool(SettingsRepository.hideNavBarOnSecondaryPreferenceKey) ??
             true;
     // 桌面外壳开关：不播种则首帧是手机导航壳、app.dart 异步载入后整树跳成
-    // 侧栏（M5）。默认 false，与 SettingsRepository.getDesktopModeEnabled 及
-    // kDesktopModeEnabled 初值三处一致。
+    // 侧栏（M5）。未设置时 Windows 默认开（桌面音乐软件式外壳：侧栏 + 底部
+    // 播放栏），其它平台默认关；与 SettingsRepository.getDesktopModeEnabled
+    // 的回退值一致（kDesktopModeEnabled 初值 false 由本行在首帧前覆盖）。
     kDesktopModeEnabled.value =
         prefs.getBool(SettingsRepository.desktopModeEnabledPreferenceKey) ??
-            false;
+            Platform.isWindows;
     // 双栏开关三端通用：非 Windows（含 TV）默认 true，宽屏双栏行为不回退；
     // Windows 默认关（上游 2026-10-24 起的口径）。与 SettingsRepository
     // .getWindowsTwoPaneEnabled 的回退值保持一致。
