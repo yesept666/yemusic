@@ -96,9 +96,9 @@ class AppTheme {
 
   /// 8 个预设种子色，取自 Material 3 官方 Theme Builder 的 key tone 40。
   /// 顺序：色环顺序（蓝→紫→青→绿→黄→橙→红→粉）。
-  /// 索引 0 是默认色，与 [defaultSeedColor] 保持一致。
+  /// 索引 0 是默认色，与 [defaultSeedColor] 保持一致（暖棕，与 Hailie 云音乐的暖调一致）。
   static const List<Color> presetSeedColors = [
-    Color(0xFF0061A4), // 蓝（默认）
+    Color(0xFF9E6B2E), // 暖棕（默认）
     Color(0xFF6750A4), // 紫（M3 默认）
     Color(0xFF006A6A), // 青绿
     Color(0xFF386A20), // 绿
@@ -108,9 +108,9 @@ class AppTheme {
     Color(0xFF984061), // 粉
   ];
 
-  /// 默认种子色（蓝色），用于未启用系统主题色且未手动选择时的兜底。
+  /// 默认种子色（暖棕），用于未启用系统主题色且未手动选择时的兜底。
   /// 必须独立定义为 const，不能引用 [presetSeedColors] 的索引（非常量表达式）。
-  static const Color defaultSeedColor = Color(0xFF0061A4);
+  static const Color defaultSeedColor = Color(0xFF9E6B2E);
 
   // CJK 字体回退链 - 按平台优先级排序:
   // 1) Web 浏览器(Windows + Edge) 优先用系统自带的 "Microsoft YaHei" (无需下载)
@@ -206,6 +206,17 @@ class AppTheme {
     var colorScheme = ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: Brightness.dark,
+    );
+    // 深色 surface 固定为暖炭色（与 Hailie 云音乐一致）：主背景 #141416、
+    // 侧栏 #202020、卡片 #232328。种子色只决定强调色（主色/次要容器），
+    // 背景不再随种子变冷变蓝。OLED 纯黑开关仍在下面优先覆盖。
+    colorScheme = colorScheme.copyWith(
+      surface: const Color(0xFF141416),
+      surfaceContainerLowest: const Color(0xFF0E0E10),
+      surfaceContainerLow: const Color(0xFF202020),
+      surfaceContainer: const Color(0xFF232328),
+      surfaceContainerHigh: const Color(0xFF2A2A2E),
+      surfaceContainerHighest: const Color(0xFF3A3A40),
     );
     if (useOledBlack) {
       colorScheme = colorScheme.copyWith(

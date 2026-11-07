@@ -21,6 +21,7 @@ import '../../widgets/m3e_container_transform.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../data/models/song.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
@@ -431,6 +432,9 @@ class _DiscoverPageState extends State<DiscoverPage>
         child: CustomScrollView(
           controller: _scrollController,
           slivers: [
+            // 常驻问候头（与 Hailie 云音乐一致）：日期 + 时段问候 + 昵称，
+            // 一直留在内容顶部；顶栏那颗问候胶囊只在启动时弹一次。
+            _buildGreetingHeader(),
             DiscoverSectionsSliver(
               config: _sectionConfig,
               onEdit: _showSectionEditor,
@@ -528,6 +532,50 @@ class _DiscoverPageState extends State<DiscoverPage>
     if (h < 14) return '中午好';
     if (h < 18) return '下午好';
     return '晚上好';
+  }
+
+  /// 「11月7日 星期六」。
+  String _todayLabel() {
+    final now = DateTime.now();
+    const weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+    return '${now.month}月${now.day}日 ${weekdays[now.weekday - 1]}';
+  }
+
+  /// 发现页顶部的常驻问候头（与 Hailie 云音乐一致）：日期 + 时段问候 + 昵称。
+  Widget _buildGreetingHeader() {
+    return SliverToBoxAdapter(
+      child: Selector<KugouProvider, String?>(
+        selector: (_, kugou) => kugou.userInfo?.nickname,
+        builder: (context, nickname, _) {
+          final name = (nickname == null || nickname.isEmpty)
+              ? ''
+              : '，$nickname';
+          final cs = Theme.of(context).colorScheme;
+          final textTheme = Theme.of(context).textTheme;
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _todayLabel(),
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${_getGreeting()}$name',
+                  style: textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildError(ColorScheme cs) {
@@ -696,21 +744,15 @@ class _DiscoverPageState extends State<DiscoverPage>
     return const SliverToBoxAdapter(child: PersonalFmSection());
   }
 
-  /// 每日推荐：竖排前四首。
+  /// 每日推荐：改成 Hailie 式的大卡片（暖棕渐变 + 大标题 + 播放按钮）。
   ///
-  /// 原来是 76dp 高的横滑条，是全页最矮的区块——语义最重的内容拿到了最轻的
-  /// 视觉权重。而且卡内布局是「封面在左、文字在右」的列表项形态，被硬塞进横滑
-  /// 列表：横滑方向和卡内阅读方向一致，眼睛不知道该往哪走。
-  ///
-  /// 改成竖排后它同时打断了「五连横滑」的单一节奏，并且复用 [SongListItem]，
-  /// 顺带拿到「正在播」高亮、收藏、更多菜单（含 MV）——原来的 _DailySongCard 一个都没有。
-  /// 全部 30 首仍在标题右侧的 `›` 里。
+  /// 原先是竖排前四首的列表，与「刷歌推荐」形态重复，视觉权重也弱。
+  /// 卡片点开进全部 30 首的详情页，播放按钮直接播全部。
   Widget _buildDailySection(ColorScheme cs) {
     return Selector<KugouProvider, List<KugouSongDetail>>(
       selector: (_, kugou) => kugou.recommendSongs,
       builder: (context, songs, _) {
         final all = songs.map((e) => e.toSong()).toList();
-        final top = all.take(4).toList();
         return SliverToBoxAdapter(
           child: DiscoverSectionFadeSwap(
             title: '每日推荐',
@@ -719,36 +761,18 @@ class _DiscoverPageState extends State<DiscoverPage>
             content: songs.isEmpty
                 // 加载结束仍一首都没有：保持原隐身行为（淡出后塌成 0 高）。
                 ? const SizedBox.shrink()
-                : _SectionBlock(
-                    title: '每日推荐',
-                    trailing: KeyedSubtree(
-                      key: _dailyMoreKey,
-                      child: IconButton(
-                        onPressed: () => _openSectionDetail(
-                          context,
-                          _dailyMoreKey,
-                          (_) => const _DailyRecommendDetailPage(),
-                        ),
-                        icon: const Icon(Icons.chevron_right),
-                      ),
-                    ),
-                    child: Padding(
-                      // SongListItem 自带 horizontal 10 的内边距，补 6 凑成
-                      // 与其他区块一致的 16dp 页边距。
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Column(
-                        children: [
-                          for (var i = 0; i < top.length; i++)
-                            SongListItem(
-                              song: top[i],
-                              showDuration: false,
-                              // 每日推荐：右侧仅收藏按钮（见改版计划二）。
-                              trailingActions: SongTrailingActions.favoriteOnly,
-                              onTap: () => context
-                                  .read<PlayerProvider>()
-                                  .playOnlinePlaylist(all, i),
-                            ),
-                        ],
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: _DailyHeroCard(
+                      songs: all,
+                      dateLabel: _todayLabel(),
+                      onPlay: () => context
+                          .read<PlayerProvider>()
+                          .playOnlinePlaylist(all, 0),
+                      onOpen: () => _openSectionDetail(
+                        context,
+                        _dailyMoreKey,
+                        (_) => const _DailyRecommendDetailPage(),
                       ),
                     ),
                   ),
@@ -757,6 +781,10 @@ class _DiscoverPageState extends State<DiscoverPage>
       },
     );
   }
+
+  /// 每日推荐大卡片：暖棕渐变底 + 日期/更新时间 + 大标题 + 艺人副标题 + 白色播放钮。
+  ///
+  /// 渐变色取自 Hailie 云音乐每日推荐卡（深酒红 #4E2224 一带）。
 
   /// 刷歌推荐：竖排前四首，形态与 [_buildDailySection] 完全一致。
   ///
@@ -902,6 +930,109 @@ class _DiscoverPageState extends State<DiscoverPage>
     if (refill == null) return;
     // 立即补一批
     await refill.append();
+  }
+}
+
+class _DailyHeroCard extends StatelessWidget {
+  const _DailyHeroCard({
+    required this.songs,
+    required this.dateLabel,
+    required this.onPlay,
+    required this.onOpen,
+  });
+
+  final List<Song> songs;
+  final String dateLabel;
+  final VoidCallback onPlay;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final artists = songs
+        .take(3)
+        .map((s) => s.artist)
+        .where((a) => a.isNotEmpty)
+        .toList();
+    final subtitle = artists.isEmpty
+        ? '共 ${songs.length} 首'
+        : '${artists.join('、')} 等 ${songs.length} 首';
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          height: 180,
+          decoration: const BoxDecoration(
+            borderRadius: BorderRadius.all(Radius.circular(20)),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF5A2626), Color(0xFF2A1512)],
+            ),
+          ),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$dateLabel · 每天 6:00 更新',
+                style: textTheme.bodySmall?.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '每日推荐',
+                style: textTheme.headlineMedium?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const Spacer(),
+              Material(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                child: InkWell(
+                  onTap: onPlay,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.play_arrow,
+                          size: 18,
+                          color: Color(0xFF1D1D1F),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '播放',
+                          style: textTheme.labelLarge?.copyWith(
+                            color: const Color(0xFF1D1D1F),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

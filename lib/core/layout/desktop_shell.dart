@@ -1,13 +1,18 @@
 import 'dart:io' show Platform;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repositories/settings_repository.dart';
 import '../../modules/player/now_playing_bar.dart';
+import '../../modules/playlist/playlist_page.dart';
 import '../../modules/search/search_page.dart';
+import '../../providers/kugou_provider.dart';
 import '../../providers/tab_config_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../services/kugou_api/kugou_api_client.dart';
+import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/resizable_splitter.dart';
 import '../utils/app_text_context_menu.dart';
 import 'adaptive_navigator.dart';
@@ -307,6 +312,8 @@ class DesktopShellState extends State<DesktopShell> {
                       railDestinations: widget.railDestinations,
                       selectedIndex: widget.selectedIndex,
                       onDestinationSelected: widget.onDestinationSelected,
+                      onSubmitSearch: _submitSearch,
+                      onOpenPlaylist: _openPlaylist,
                     ),
                   ),
                   ResizableSplitter(
@@ -409,19 +416,62 @@ class DesktopShellState extends State<DesktopShell> {
       MaterialPageRoute(builder: (_) => SearchPage(initialQuery: q)),
     );
   }
+
+  /// 侧栏「我的歌单」点一项打开歌单详情：双栏 Tab（收藏/本地音乐）进右侧
+  /// 详情面板，其余 Tab 进当前 Tab 的中央内容栈（与在收藏页点歌单一致）。
+  void _openPlaylist(KugouPlaylistBrief playlist) {
+    final page = PlaylistPage(
+      playlist: playlist.toPlaylist(),
+      isInMyFavorites: true,
+      isUserCreated: _isCreatedPlaylist(playlist),
+      isDefaultFavorite: playlist.name == '我喜欢',
+    );
+    final tabId = _currentTabId();
+    if (tabId != null &&
+        _kTwoPaneTabs.contains(tabId) &&
+        AdaptiveNav.pushDetailGlobal((_) => page)) {
+      return;
+    }
+    _activeNav()?.push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  /// 与收藏页 `_isCreated` 同一判定：自建歌单（可批量删歌）与收藏他人歌单区分。
+  bool _isCreatedPlaylist(KugouPlaylistBrief p) {
+    final uid = KugouApiClient().userid;
+    if (uid != null &&
+        p.listCreateUserid != null &&
+        p.listCreateUserid!.isNotEmpty) {
+      return p.listCreateUserid == uid;
+    }
+    if (p.type == 0 && p.source != 2) return true;
+    if (p.name == '我喜欢' || p.name == '默认收藏') return true;
+    return false;
+  }
 }
 
 /// 桌面侧栏：复用 rail 目标渲染的可见 Tab 列表（图标 + 文字）。
+///
+/// 布局（与 Hailie 云音乐一致）：顶部是 App 名称，接着是搜索框，
+/// 然后是贴顶的导航项，最下方是可滚动的「我的歌单」列表。
+/// 原先导航项整组垂直居中，下方留一大段空白，看着发空，故改为贴顶。
 class _DesktopSidebar extends StatelessWidget {
   const _DesktopSidebar({
     required this.railDestinations,
     required this.selectedIndex,
     required this.onDestinationSelected,
+    required this.onSubmitSearch,
+    required this.onOpenPlaylist,
   });
 
   final List<NavigationRailDestination> railDestinations;
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
+
+  /// 侧栏搜索框提交：走全局搜索，在当前 Tab 的中央内容区展示结果。
+  final ValueChanged<String> onSubmitSearch;
+
+  /// 侧栏歌单点一项：在当前 Tab 的内容区打开歌单详情。
+  final ValueChanged<KugouPlaylistBrief> onOpenPlaylist;
 
   @override
   Widget build(BuildContext context) {
@@ -452,34 +502,229 @@ class _DesktopSidebar extends StatelessWidget {
               ],
             ),
           ),
-          Expanded(
-            // 导航项整组在侧栏内**垂直居中**：侧栏顶部是 App 名称、底部紧接
-            // 迷你播放器（NowPlayingBar 在外层整宽条），若列表贴顶，下方会留下
-            // 一大段空白、整列明显偏上。Center + shrinkWrap 让这组条目居中于
-            // 「标题之下、播放条之上」的可用高度；条目多到放不下时 ListView
-            // 仍会正常滚动（shrinkWrap 被 max 高度钳制）。
-            child: Center(
-              child: ListView.builder(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                itemCount: railDestinations.length,
-                itemBuilder: (context, i) {
-                  final selected = i == selectedIndex;
-                  final dest = railDestinations[i];
-                  return _SidebarItem(
-                    icon: selected ? dest.selectedIcon : dest.icon,
-                    label: dest.label,
-                    selected: selected,
-                    onTap: () => onDestinationSelected(i),
-                  );
-                },
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: _SearchField(onSubmit: onSubmitSearch),
+          ),
+          // 导航项贴顶：条目多到放不下时由下方的歌单区滚动承接，
+          // 导航本身用 shrinkWrap + 不可滚动，避免两层滚动打架。
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            itemCount: railDestinations.length,
+            itemBuilder: (context, i) {
+              final selected = i == selectedIndex;
+              final dest = railDestinations[i];
+              return _SidebarItem(
+                icon: selected ? dest.selectedIcon : dest.icon,
+                label: dest.label,
+                selected: selected,
+                onTap: () => onDestinationSelected(i),
+              );
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 12, 4),
+            child: Text(
+              '我的歌单',
+              style: textTheme.titleSmall?.copyWith(
+                color: cs.onSurfaceVariant,
               ),
             ),
+          ),
+          Expanded(
+            child: _SidebarPlaylists(onOpenPlaylist: onOpenPlaylist),
           ),
         ],
       ),
     );
   }
+}
+
+/// 侧栏「我的歌单」：与收藏页同一接口拉取用户歌单，只取自建的，
+/// 点一项在当前 Tab 的内容区打开歌单详情。
+class _SidebarPlaylists extends StatefulWidget {
+  const _SidebarPlaylists({required this.onOpenPlaylist});
+
+  final ValueChanged<KugouPlaylistBrief> onOpenPlaylist;
+
+  @override
+  State<_SidebarPlaylists> createState() => _SidebarPlaylistsState();
+}
+
+class _SidebarPlaylistsState extends State<_SidebarPlaylists> {
+  List<KugouPlaylistBrief> _playlists = [];
+  bool _loaded = false;
+  KugouProvider? _provider;
+  String? _lastUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    // 侧栏可能比登录先挂载：账号变化（登录/切换/退出）时重拉一次。
+    final provider = context.read<KugouProvider>();
+    _provider = provider;
+    _lastUserId = KugouApiClient().userid;
+    provider.addListener(_onProviderChanged);
+  }
+
+  void _onProviderChanged() {
+    final uid = KugouApiClient().userid;
+    if (uid != _lastUserId) {
+      _lastUserId = uid;
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _provider?.removeListener(_onProviderChanged);
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final result = await KugouApiClient().getAllUserPlaylists();
+    if (!mounted) return;
+    if (result == null) {
+      setState(() => _loaded = true);
+      return;
+    }
+    final data = result['data'];
+    List<dynamic>? list;
+    if (data is List) {
+      list = data;
+    } else if (data is Map<String, dynamic>) {
+      list = data['info'] as List<dynamic>?;
+      list ??= data['list'] as List<dynamic>?;
+    }
+    if (list == null) {
+      setState(() => _loaded = true);
+      return;
+    }
+    final all = list
+        .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
+        .toList();
+    setState(() {
+      _playlists = all.where(_isCreated).toList();
+      _loaded = true;
+    });
+  }
+
+  /// 与收藏页 `_isCreated` 同一判定。
+  bool _isCreated(KugouPlaylistBrief p) {
+    final uid = KugouApiClient().userid;
+    if (uid != null &&
+        p.listCreateUserid != null &&
+        p.listCreateUserid!.isNotEmpty) {
+      return p.listCreateUserid == uid;
+    }
+    if (p.type == 0 && p.source != 2) return true;
+    if (p.name == '我喜欢' || p.name == '默认收藏') return true;
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    if (!_loaded) return const SizedBox.shrink();
+    if (_playlists.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
+        child: Text(
+          '暂无自建歌单',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+      itemCount: _playlists.length,
+      itemBuilder: (context, i) {
+        final p = _playlists[i];
+        return _SidebarPlaylistItem(
+          playlist: p,
+          onTap: () => widget.onOpenPlaylist(p),
+        );
+      },
+    );
+  }
+}
+
+/// 侧栏歌单行：小封面 + 歌名 + 首数，点开歌单详情。
+class _SidebarPlaylistItem extends StatelessWidget {
+  const _SidebarPlaylistItem({required this.playlist, required this.onTap});
+
+  final KugouPlaylistBrief playlist;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: playlist.coverUrl != null &&
+                          playlist.coverUrl!.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: playlist.coverUrl!,
+                          width: 36,
+                          height: 36,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, _, _) => _fallbackCover(cs),
+                        )
+                      : _fallbackCover(cs),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        playlist.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${playlist.songCount} 首',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fallbackCover(ColorScheme cs) => Container(
+        width: 36,
+        height: 36,
+        color: cs.surfaceContainerHighest,
+        child: Icon(Icons.music_note, size: 20, color: cs.onSurfaceVariant),
+      );
 }
 
 class _SidebarItem extends StatelessWidget {
